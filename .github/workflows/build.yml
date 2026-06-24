@@ -43,7 +43,7 @@ jobs:
         run: pip install uv
 
       - name: Install deps
-        run: uv sync --python 3.13 --group build
+        run: uv sync --python 3.13 --group build --index-url https://pypi.org/simple/
 
       # ── ccache ──
       - name: Install ccache (Linux)
