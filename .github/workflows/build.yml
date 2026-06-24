@@ -27,7 +27,7 @@ jobs:
           repository: dlcman/agent-source
           ref: nuitka-build
           submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_PAT }}
 
       - name: Set version
         run: |
