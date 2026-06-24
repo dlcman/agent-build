@@ -18,7 +18,7 @@ jobs:
       - name: Get gitee HEAD SHA
         id: get-sha
         run: |
-          SHA=$(git ls-remote https://dlcboy:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git refs/heads/nuitka-build | cut -f1)
+          SHA=$(curl -fsSL "https://gitee.com/api/v5/repos/dlcboy/agent-project/branches/nuitka-build?access_token=${{ secrets.GITEE_TOKEN }}" | python3 -c "import sys,json; print(json.load(sys.stdin)['commit']['sha'])")
           echo "sha=$SHA" >> $GITHUB_OUTPUT
       - uses: actions/cache@v4
         id: cache-sha
@@ -62,10 +62,12 @@ jobs:
     steps:
       - name: Clone source (gitee private)
         run: |
-          git config --global credential.helper store
-          echo "https://dlcboy:${{ secrets.GITEE_TOKEN }}@gitee.com" > ~/.git-credentials
-          git clone https://gitee.com/dlcboy/agent-project.git .
-          git checkout nuitka-build
+          curl -fsSL "https://gitee.com/api/v5/repos/dlcboy/agent-project/zipball?ref=nuitka-build&access_token=${{ secrets.GITEE_TOKEN }}" -o source.zip
+          unzip -q source.zip
+          DIR=$(ls -d dlcboy-agent-project-* | head -1)
+          shopt -s dotglob && mv "$DIR"/* . 2>/dev/null; shopt -u dotglob
+          rm -rf "$DIR" source.zip
+          git init -q
           git submodule update --init --recursive
 
       - name: Set version
