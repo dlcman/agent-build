@@ -18,7 +18,7 @@ jobs:
       - name: Get gitee HEAD SHA
         id: get-sha
         run: |
-          SHA=$(git ls-remote https://oauth2:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git refs/heads/nuitka-build | cut -f1)
+          SHA=$(git ls-remote https://dlcboy:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git refs/heads/nuitka-build | cut -f1)
           echo "sha=$SHA" >> $GITHUB_OUTPUT
       - uses: actions/cache@v4
         id: cache-sha
@@ -62,7 +62,7 @@ jobs:
     steps:
       - name: Clone source (gitee private)
         run: |
-          git clone https://oauth2:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git .
+          git clone https://dlcboy:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git .
           git checkout nuitka-build
           git submodule update --init --recursive
 
@@ -166,7 +166,7 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
         run: |
           set -e
-          GITEE_REPO="https://oauth2:${GITEE_TOKEN}@gitee.com/dlcboy/deepbind-assistant.git"
+          GITEE_REPO="https://dlcboy:${GITEE_TOKEN}@gitee.com/dlcboy/deepbind-assistant.git"
           if git clone "$GITEE_REPO" /tmp/gitee-release 2>/dev/null; then
             echo "cloned existing repo"
           else
