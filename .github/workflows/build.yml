@@ -3,52 +3,14 @@ name: Build Agent Project
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'  # 每 30 分钟检测 gitee 分支变化
+    - cron: '*/30 * * * *'
 
 concurrency:
   group: agent-build
   cancel-in-progress: false
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    outputs:
-      changed: ${{ steps.check-sha.outputs.changed }}
-    steps:
-      - name: Get gitee HEAD SHA
-        id: get-sha
-        run: |
-          SHA=$(curl -fsSL "https://gitee.com/api/v5/repos/dlcboy/agent-project/branches/nuitka-build?access_token=${{ secrets.GITEE_TOKEN }}" | python3 -c "import sys,json; print(json.load(sys.stdin)['commit']['sha'])")
-          echo "sha=$SHA" >> $GITHUB_OUTPUT
-      - uses: actions/cache@v4
-        id: cache-sha
-        with:
-          path: .last-sha
-          key: gitee-nuitka-build-sha
-      - name: Compare SHA
-        id: check-sha
-        run: |
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Manual trigger, always build."
-            exit 0
-          fi
-          NEW="${{ steps.get-sha.outputs.sha }}"
-          OLD=$(cat .last-sha 2>/dev/null || echo "")
-          if [ "$NEW" = "$OLD" ]; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No changes, skip."
-          else
-            echo "$NEW" > .last-sha
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "New commit detected: $NEW"
-          fi
-
   build:
-    needs: check
-    if: |
-      github.event_name == 'workflow_dispatch' ||
-      needs.check.outputs.changed == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -60,18 +22,14 @@ jobs:
         shell: bash
 
     steps:
-      - name: Clone source (gitee private)
-        run: |
-          curl -fsSL "https://gitee.com/api/v5/repos/dlcboy/agent-project/zipball?ref=nuitka-build&access_token=${{ secrets.GITEE_TOKEN }}" -o source.zip
-          unzip -q source.zip
-          DIR=$(ls -d dlcboy-agent-project-* | head -1)
-          shopt -s dotglob && mv "$DIR"/* . 2>/dev/null; shopt -u dotglob
-          rm -rf "$DIR" source.zip
-          git init -q
-          git submodule update --init --recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: dlcman/agent-source
+          ref: nuitka-build
+          submodules: recursive
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set version
-        id: version
         run: |
           VER="$(git log -1 --format='%ad' --date=short HEAD)-$(git rev-parse --short=7 HEAD)"
           echo "VERSION=$VER" >> $GITHUB_ENV
@@ -87,7 +45,7 @@ jobs:
       - name: Install deps
         run: uv sync --python 3.13 --group build
 
-      # ── ccache (Linux only) ──
+      # ── ccache ──
       - name: Install ccache (Linux)
         if: runner.os == 'Linux'
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache
@@ -131,7 +89,7 @@ jobs:
         run: |
           cd agent-project.dist
           cat > .env << 'EOF'
-          SECRET_KEY=ci-s...ey
+          SECRET_KEY=ci-smoke-test-key
           HOST=127.0.0.1
           PORT=8099
           EOF
