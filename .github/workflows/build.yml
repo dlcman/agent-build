@@ -2,9 +2,49 @@ name: Build Agent Project
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'  # 每 30 分钟检测 gitee 分支变化
+
+concurrency:
+  group: agent-build
+  cancel-in-progress: false
 
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_dispatch'
+    outputs:
+      changed: ${{ steps.check-sha.outputs.changed }}
+    steps:
+      - name: Get gitee HEAD SHA
+        id: get-sha
+        run: |
+          SHA=$(git ls-remote https://oauth2:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git refs/heads/nuitka-build | cut -f1)
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+      - uses: actions/cache@v4
+        id: cache-sha
+        with:
+          path: .last-sha
+          key: gitee-nuitka-build-sha
+      - name: Compare SHA
+        id: check-sha
+        run: |
+          NEW="${{ steps.get-sha.outputs.sha }}"
+          OLD=$(cat .last-sha 2>/dev/null || echo "")
+          if [ "$NEW" = "$OLD" ]; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes, skip."
+          else
+            echo "$NEW" > .last-sha
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "New commit detected: $NEW"
+          fi
+
   build:
+    needs: check
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      needs.check.outputs.changed == 'true'
     strategy:
       fail-fast: false
       matrix:
