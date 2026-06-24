@@ -35,10 +35,3 @@ Gitee: dlcboy/deepbind-assistant (公开) ← 产物下载
 | `GITEE_TOKEN` | gitee 私人令牌，需 `repo` 权限 |
 
 配置路径: Settings → Secrets and variables → Actions → New repository secret
-
-## 本地使用产物
-
-1. 解压 zip，编辑 `.env.example` 改名为 `.env` 填入配置
-2. Linux/macOS: `./run.sh` (首次需 `chmod +x run.sh`)
-3. Windows: 双击 `run.bat`
-4. 浏览器打开 http://localhost:8003
