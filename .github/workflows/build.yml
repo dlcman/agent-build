@@ -1,0 +1,134 @@
+name: Build Agent Project
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Clone source (gitee private)
+        run: |
+          git clone https://oauth2:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git .
+          git checkout nuitka-build
+          git submodule update --init --recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Install deps
+        run: uv sync --python 3.13 --group build
+
+      # ── ccache (Linux only) ──
+      - name: Install ccache
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ccache
+
+      - uses: actions/cache@v4
+        if: runner.os == 'Linux'
+        with:
+          path: ~/.ccache
+          key: ${{ runner.os }}-nuitka-ccache-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-nuitka-ccache-
+
+      # ── Nuitka standalone ──
+      - name: Build (Nuitka --standalone)
+        run: |
+          export PYTHONPATH="$PWD/hermes-webui${PYTHONPATH:+:$PYTHONPATH}"
+          .venv/bin/python -m nuitka --standalone \
+            --output-filename=agent-project \
+            --include-package=agent_server \
+            --include-package=api \
+            --include-data-dir=hermes-webui/static=static \
+            --include-data-dir=agent_server/resource=agent_server/resource \
+            --assume-yes-for-downloads \
+            agent_server/__main__.py
+
+          for d in *.dist; do
+            [ -d "$d" ] || continue
+            [ "$d" = "agent-project.dist" ] && continue
+            mv "$d" agent-project.dist
+            break
+          done
+
+      # ── Smoke test ──
+      - name: Smoke test
+        if: runner.os == 'Linux'
+        timeout-minutes: 2
+        run: |
+          cd agent-project.dist
+          cat > .env << 'EOF'
+          SECRET_KEY=ci-s...ey
+          HOST=127.0.0.1
+          PORT=8099
+          EOF
+          ./agent-project &
+          PID=$!
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8099/api/health/agent | grep -q '"alive": *true'; then
+              echo "✅ agent-project alive"
+              kill $PID 2>/dev/null
+              exit 0
+            fi
+            sleep 1
+          done
+          kill $PID 2>/dev/null
+          echo "❌ agent-project failed to start within 20s"
+          exit 1
+
+      # ── Package ──
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p _pkg
+          cp -r agent-project.dist _pkg/
+          cp .env.example script/run_build_product/run.sh script/run_build_product/run.bat README_BUILD.md _pkg/ 2>/dev/null || true
+          cd _pkg
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../agent-project-${{ matrix.os }}.zip" . > /dev/null
+          else
+            zip -r "../agent-project-${{ matrix.os }}.zip" . > /dev/null
+          fi
+
+      # ── Push to Gitee release repo ──
+      - name: Push to Gitee
+        if: runner.os == 'Linux'
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          set -e
+          GITEE_REPO="https://oauth2:${GITEE_TOKEN}@gitee.com/dlcboy/deepbind-assistant.git"
+          if git clone "$GITEE_REPO" /tmp/gitee-release 2>/dev/null; then
+            echo "cloned existing repo"
+          else
+            mkdir -p /tmp/gitee-release && cd /tmp/gitee-release
+            git init && git checkout -b master
+            git remote add origin "$GITEE_REPO"
+          fi
+          cd /tmp/gitee-release
+          rm -f *.zip 2>/dev/null || true
+          cp "$GITHUB_WORKSPACE/agent-project-${{ matrix.os }}.zip" .
+          git add -A
+          git config user.email "ci@github.com"
+          git config user.name "GitHub Actions"
+          git commit -m "ci: build $(date +%Y%m%d-%H%M)" || echo "(no changes)"
+          git push origin master
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-project-${{ matrix.os }}
+          path: agent-project-${{ matrix.os }}.zip
