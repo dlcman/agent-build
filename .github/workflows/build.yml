@@ -12,7 +12,6 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    if: github.event_name != 'workflow_dispatch'
     outputs:
       changed: ${{ steps.check-sha.outputs.changed }}
     steps:
@@ -29,6 +28,11 @@ jobs:
       - name: Compare SHA
         id: check-sha
         run: |
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Manual trigger, always build."
+            exit 0
+          fi
           NEW="${{ steps.get-sha.outputs.sha }}"
           OLD=$(cat .last-sha 2>/dev/null || echo "")
           if [ "$NEW" = "$OLD" ]; then
