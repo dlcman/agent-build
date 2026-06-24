@@ -62,7 +62,9 @@ jobs:
     steps:
       - name: Clone source (gitee private)
         run: |
-          git clone https://dlcboy:${{ secrets.GITEE_TOKEN }}@gitee.com/dlcboy/agent-project.git .
+          git config --global credential.helper store
+          echo "https://dlcboy:${{ secrets.GITEE_TOKEN }}@gitee.com" > ~/.git-credentials
+          git clone https://gitee.com/dlcboy/agent-project.git .
           git checkout nuitka-build
           git submodule update --init --recursive
 
