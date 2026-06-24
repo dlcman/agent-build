@@ -62,6 +62,13 @@ jobs:
           git checkout nuitka-build
           git submodule update --init --recursive
 
+      - name: Set version
+        id: version
+        run: |
+          VER="$(git log -1 --format='%ad' --date=short HEAD)-$(git rev-parse --short=7 HEAD)"
+          echo "VERSION=$VER" >> $GITHUB_ENV
+          echo "Version: $VER"
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -143,9 +150,9 @@ jobs:
           cp .env.example script/run_build_product/run.sh script/run_build_product/run.bat README_BUILD.md _pkg/ 2>/dev/null || true
           cd _pkg
           if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a "../agent-project-${{ matrix.os }}.zip" . > /dev/null
+            7z a "../agent-project-${VERSION}-${{ matrix.os }}.zip" . > /dev/null
           else
-            zip -r "../agent-project-${{ matrix.os }}.zip" . > /dev/null
+            zip -r "../agent-project-${VERSION}-${{ matrix.os }}.zip" . > /dev/null
           fi
 
       # ── Push to Gitee release repo ──
@@ -164,8 +171,7 @@ jobs:
             git remote add origin "$GITEE_REPO"
           fi
           cd /tmp/gitee-release
-          rm -f *.zip 2>/dev/null || true
-          cp "$GITHUB_WORKSPACE/agent-project-${{ matrix.os }}.zip" .
+          cp "$GITHUB_WORKSPACE/agent-project-${VERSION}-${{ matrix.os }}.zip" .
           git add -A
           git config user.email "ci@github.com"
           git config user.name "GitHub Actions"
@@ -174,5 +180,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-project-${{ matrix.os }}
-          path: agent-project-${{ matrix.os }}.zip
+          name: agent-project-${VERSION}-${{ matrix.os }}
+          path: agent-project-${VERSION}-${{ matrix.os }}.zip
