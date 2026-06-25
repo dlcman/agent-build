@@ -216,6 +216,16 @@ jobs:
           cp "$GITHUB_WORKSPACE"/_release/* .
           cp "$GITHUB_WORKSPACE"/agent-project-*.zip . 2>/dev/null || true
 
+          # 生成 versions.json (保留最近 10 个版本)
+          VERSIONS_FILE="versions.json"
+          python3 -c "
+import json
+old = json.loads(open('${VERSIONS_FILE}').read()) if __import__('os').path.exists('${VERSIONS_FILE}') else []
+old.insert(0, '${VERSION}')
+seen = set(); uniq = [v for v in old if not (v in seen or seen.add(v))]
+json.dump(uniq[:10], open('${VERSIONS_FILE}', 'w'))
+"
+
           git add -A
           git config user.email "ci@github.com"
           git config user.name "GitHub Actions"
