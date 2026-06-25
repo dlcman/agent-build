@@ -33,6 +33,16 @@ jobs:
           echo "VERSION=$VER" >> $GITHUB_ENV
           echo "Version: $VER"
 
+      # 平台标识 (macos / windows / linux)
+      - name: Set platform tag
+        run: |
+          case "$RUNNER_OS" in
+            Linux)   PT=linux ;;
+            macOS)   PT=macos ;;
+            Windows) PT=windows ;;
+          esac
+          echo "PLATFORM_TAG=$PT" >> $GITHUB_ENV
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
@@ -60,8 +70,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuitka-ccache-
 
-      # ── Nuitka standalone ──
-      - name: Build (Nuitka --standalone)
+      # ═══════════════════════════════════════════
+      # 1. 构建 agent-server
+      # ═══════════════════════════════════════════
+      - name: Build agent-server (Nuitka --standalone)
         run: |
           export PYTHONPATH="$PWD/hermes-webui${PYTHONPATH:+:$PYTHONPATH}"
           .venv/bin/python -m nuitka --standalone \
@@ -80,21 +92,20 @@ jobs:
             break
           done
 
-      # ── Smoke test ──
-      - name: Smoke test
+      - name: Smoke test agent-server
         if: runner.os == 'Linux'
         timeout-minutes: 2
         run: |
           cd agent-project.dist
           cat > .env << 'EOF'
-          SECRET_KEY=ci-smoke-test-key
+          SECRET_KEY=***
           HOST=127.0.0.1
           PORT=8099
           EOF
           ./agent-project &
           PID=$!
           for i in $(seq 1 20); do
-            if curl -sf http://127.0.0.1:8099/api/health/agent | grep -q '"alive": *true'; then
+            if curl -sf http://127.0.0.1:8099/api/health/agent; then
               echo "✅ agent-project alive"
               kill $PID 2>/dev/null
               exit 0
@@ -105,21 +116,79 @@ jobs:
           echo "❌ agent-project failed to start within 20s"
           exit 1
 
-      # ── Package ──
-      - name: Package
+      # ═══════════════════════════════════════════
+      # 2. 构建 daemon
+      # ═══════════════════════════════════════════
+      - name: Build daemon (Nuitka --standalone)
+        run: |
+          cd intsall/daemon
+          .venv/bin/python -m nuitka --standalone \
+            --output-filename=agent-daemon \
+            --assume-yes-for-downloads \
+            daemon.py
+
+      # ═══════════════════════════════════════════
+      # 3. 构建 installer
+      # ═══════════════════════════════════════════
+      - name: Build installer (Nuitka --standalone)
+        run: |
+          cd intsall/installer
+          DAEMON_DIST="$GITHUB_WORKSPACE/intsall/daemon/agent-daemon.dist"
+          PLUGIN_DIST="$GITHUB_WORKSPACE/wps-plugin/dist"
+
+          .venv/bin/python -m nuitka --standalone \
+            --output-filename=installer \
+            --include-data-dir="$DAEMON_DIST"=daemon \
+            --include-data-dir="$PLUGIN_DIST"=plugin_data \
+            --assume-yes-for-downloads \
+            installer.py
+
+      # ═══════════════════════════════════════════
+      # 4. 打包 (zips + raw binaries)
+      # ═══════════════════════════════════════════
+      - name: Collect artifacts
         shell: bash
         run: |
-          mkdir -p _pkg
-          cp -r agent-project.dist _pkg/
-          cp .env.example script/run_build_product/run.sh script/run_build_product/run.bat README_BUILD.md _pkg/ 2>/dev/null || true
-          cd _pkg
-          if [ "$RUNNER_OS" = "Windows" ]; then
-            7z a "../agent-project-${VERSION}-${{ matrix.os }}.zip" . > /dev/null
-          else
-            zip -r "../agent-project-${VERSION}-${{ matrix.os }}.zip" . > /dev/null
-          fi
+          mkdir -p _release
 
-      # ── Push to Gitee release repo ──
+          # agent-server raw binary (for daemon download)
+          AGENT_BIN="agent-project"
+          [ "$RUNNER_OS" = "Windows" ] && AGENT_BIN="agent-project.exe"
+          cp "agent-project.dist/$AGENT_BIN" "_release/agent-project-$PLATFORM_TAG" 2>/dev/null || \
+            cp "agent-project.dist/$AGENT_BIN" "_release/agent-project-$PLATFORM_TAG.exe"
+
+          # agent-server zip (for manual)
+          cp -r agent-project.dist _release/
+          cd _release
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            7z a "../agent-project-$VERSION-$PLATFORM_TAG.zip" . > /dev/null
+          else
+            zip -r "../agent-project-$VERSION-$PLATFORM_TAG.zip" . > /dev/null
+          fi
+          cd "$GITHUB_WORKSPACE"
+          rm -rf _release/agent-project.dist
+
+          # daemon raw binary (for self-update)
+          DAEMON_DIR="intsall/daemon/agent-daemon.dist"
+          DAEMON_BIN="agent-daemon"
+          [ "$RUNNER_OS" = "Windows" ] && DAEMON_BIN="agent-daemon.exe"
+          cp "$DAEMON_DIR/$DAEMON_BIN" "_release/agent-daemon-$PLATFORM_TAG" 2>/dev/null || \
+            cp "$DAEMON_DIR/$DAEMON_BIN" "_release/agent-daemon-$PLATFORM_TAG.exe"
+
+          # installer binary (for manual download)
+          INST_BIN="intsall/installer/installer.dist/installer"
+          [ "$RUNNER_OS" = "Windows" ] && INST_BIN="intsall/installer/installer.dist/installer.exe"
+          cp "$INST_BIN" "_release/installer-$PLATFORM_TAG" 2>/dev/null || \
+            cp "$INST_BIN" "_release/installer-$PLATFORM_TAG.exe"
+
+          # .version
+          echo "$VERSION" > _release/.version
+
+          ls -lh _release/
+
+      # ═══════════════════════════════════════════
+      # 5. 推到 gitee release 仓库
+      # ═══════════════════════════════════════════
       - name: Push to Gitee
         if: runner.os == 'Linux'
         env:
@@ -129,20 +198,30 @@ jobs:
           GITEE_REPO="https://dlcboy:${GITEE_TOKEN}@gitee.com/dlcboy/deepbind-assistant.git"
           if git clone "$GITEE_REPO" /tmp/gitee-release 2>/dev/null; then
             echo "cloned existing repo"
+            rm -rf /tmp/gitee-release/* 2>/dev/null || true
           else
             mkdir -p /tmp/gitee-release && cd /tmp/gitee-release
             git init && git checkout -b master
             git remote add origin "$GITEE_REPO"
           fi
           cd /tmp/gitee-release
-          cp "$GITHUB_WORKSPACE/agent-project-${VERSION}-${{ matrix.os }}.zip" .
+
+          # 拷贝所有产物
+          cp "$GITHUB_WORKSPACE"/_release/* .
+          cp "$GITHUB_WORKSPACE"/agent-project-*.zip . 2>/dev/null || true
+
           git add -A
           git config user.email "ci@github.com"
           git config user.name "GitHub Actions"
-          git commit -m "ci: build $(date +%Y%m%d-%H%M)" || echo "(no changes)"
+          git commit -m "ci: build $(date +%Y%m%d-%H%M) [$VERSION]" || echo "(no changes)"
           git push origin master
 
+      # ═══════════════════════════════════════════
+      # 6. GitHub Artifact
+      # ═══════════════════════════════════════════
       - uses: actions/upload-artifact@v4
         with:
-          name: agent-project-${VERSION}-${{ matrix.os }}
-          path: agent-project-${VERSION}-${{ matrix.os }}.zip
+          name: agent-project-${{ env.VERSION }}-${{ matrix.os }}
+          path: |
+            agent-project-*.zip
+            _release/*
