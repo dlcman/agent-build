@@ -156,6 +156,8 @@ jobs:
           [ "$RUNNER_OS" = "Windows" ] && AGENT_BIN="agent-project.exe"
           cp "agent-project.dist/$AGENT_BIN" "_release/agent-project-$PLATFORM_TAG" 2>/dev/null || \
             cp "agent-project.dist/$AGENT_BIN" "_release/agent-project-$PLATFORM_TAG.exe"
+          AGENT_RAW=$(ls _release/agent-project-$PLATFORM_TAG* | head -1)
+          sha256sum "$AGENT_RAW" | cut -d' ' -f1 > "${AGENT_RAW}.sha256"
 
           # agent-server zip (for manual)
           cp -r agent-project.dist _release/
@@ -174,12 +176,16 @@ jobs:
           [ "$RUNNER_OS" = "Windows" ] && DAEMON_BIN="agent-daemon.exe"
           cp "$DAEMON_DIR/$DAEMON_BIN" "_release/agent-daemon-$PLATFORM_TAG" 2>/dev/null || \
             cp "$DAEMON_DIR/$DAEMON_BIN" "_release/agent-daemon-$PLATFORM_TAG.exe"
+          DAEMON_RAW=$(ls _release/agent-daemon-$PLATFORM_TAG* | head -1)
+          sha256sum "$DAEMON_RAW" | cut -d' ' -f1 > "${DAEMON_RAW}.sha256"
 
           # installer binary (for manual download)
           INST_BIN="intsall/installer/installer.dist/installer"
           [ "$RUNNER_OS" = "Windows" ] && INST_BIN="intsall/installer/installer.dist/installer.exe"
           cp "$INST_BIN" "_release/installer-$PLATFORM_TAG" 2>/dev/null || \
             cp "$INST_BIN" "_release/installer-$PLATFORM_TAG.exe"
+          INST_RAW=$(ls _release/installer-$PLATFORM_TAG* | head -1)
+          sha256sum "$INST_RAW" | cut -d' ' -f1 > "${INST_RAW}.sha256"
 
           # .version
           echo "$VERSION" > _release/.version
